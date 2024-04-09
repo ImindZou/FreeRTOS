@@ -329,6 +329,10 @@ log_e("我是 wifi.proto 日志");
 
 #include <elog.h>
 
+elog_set_filter_tag_lvl("wifi.package", ELOG_LVL_ERROR);	
+//这里结合我自己的见解进行配置，如果第一第三有效果的话当然是最好的，我是没效果采用了这种方式。这种方法经过实验确实还是比较必要的，因为他要配合标签来进行宏编译时候的初始化，当然不同文件的结果可能不同。
+
+
 log_w("我是 wifi.package 日志");
 ```
 
@@ -346,6 +350,274 @@ log_w("我是 can.disp 日志");
 ![tutieshi_640x360_4s](https://zdh934.oss-cn-shenzhen.aliyuncs.com/PigGo/202404081042141.gif)
 
 ![image-20240408105519885](https://zdh934.oss-cn-shenzhen.aliyuncs.com/PigGo/202404081055975.png)
+
+
+
+**技巧二** ：为了实现按照模块、子模块作用域来限制日志输出级别的功能，可以按照下面的方式，在模块的头文件中定义以下宏定义：
+
+```c
+/**
+ * Log default configuration for EasyLogger.
+ * NOTE: Must defined before including the <elog.h>			记录默认的log配置，记得在<elog.h>之前定义
+ */
+#if !defined(LOG_TAG)
+    #define LOG_TAG                    "xx"
+#endif
+#undef LOG_LVL
+#if defined(XX_LOG_LVL)
+    #define LOG_LVL                    XX_LOG_LVL
+#endif
+```
+
+**XX 是模块名称的缩写**，该段内容务必定义在 `elog.h` 之前，否则失效；这样做的 **好处** 是，如果模块内的源文件没有定义 TAG ，则会自动引用该段内容中的定义的 TAG 。同时可以在 头文件中可以配置 `XX_LOG_LVL` ，这样只会输出比这个优先级高或相等级别的日志。当然 XX_LOG_LVL 这个宏也可以不定义，此时会输出全部级别的日志，定义为 ASSERT 级别，就只剩断言信息了。 此时我们就能够实现 **源文件->子模块->模块->EasyLogger全局** 对于其中任何环节的日志配置及控制。调试时想要查看其中任何环节的日志，或者调整其中的某个环节日志级别，都会非常轻松，极大的提高了调试的灵活性及效率。
+
+> 这让我强烈感觉我自己摸索的方法是巧合，碰巧弄出来了，但也不能这么说，这不是设计上的闭环，可能这说的知识一种策略，我用的是另外一种策略，然后刚好可以达到同样目的地，经过实验不是黑魔法，计算机里也没有黑魔法。有的只是认知差。
+
+#### 1.3.2 输出 RAW 格式日志
+
+
+
+```c
+void elog_raw(const char *format, ...)
+```
+
+
+
+| 参数   | 描述                       |
+| ------ | -------------------------- |
+| format | 样式，类似`printf`首个入参 |
+| ...    | 不定参                     |
+
+
+
+### 1.4 断言
+
+
+
+#### 1.4.1 使用断言
+
+
+
+EasyLogger自带的断言，可以直接用户软件，在断言表达式不成立后会输出断言信息并保持`while(1)`，或者执行断言钩子方法，钩子方法的设定参考 [`elog_assert_set_hook`](https://github.com/armink/EasyLogger/blob/master/docs/zh/api/kernel.md#114-设置断言钩子方法)。
+
+```c
+#define ELOG_ASSERT(EXPR)
+#define assert(EXPR)   //简化形式
+```
+
+
+
+| 参数 | 描述   |
+| ---- | ------ |
+| EXPR | 表达式 |
+
+#### 1.4.2 设置断言钩子方法
+
+
+
+默认断言钩子方法为空，设置断言钩子方法后。当断言`ELOG_ASSERT(EXPR)`中的条件不满足时，会自动执行断言钩子方法。断言钩子方法定义及使用可以参考上一章节的例子。
+
+```c
+void elog_assert_set_hook(void (*hook)(const char* expr, const char* func, size_t line))
+```
+
+> 这是一个函数指针，需要用户自己定义，下面1.5有一个写入Flash用到断言的示例，这里没有用到Flash也没有配置开启Flash的宏，就不去实验了。
+
+| 参数 | 描述         |
+| ---- | ------------ |
+| hook | 断言钩子方法 |
+
+### 1.5 日志输出控制
+
+
+
+#### 1.5.1 使能/失能日志输出
+
+
+
+```c
+void elog_set_output_enabled(bool enabled)
+```
+
+> 这个可以单独设置日志的输出状态
+
+| 参数    | 描述                    |
+| ------- | ----------------------- |
+| enabled | true: 使能，false: 失能 |
+
+#### 1.5.2 获取日志使能状态
+
+
+
+```c
+bool elog_get_output_enabled(void)
+```
+
+
+
+#### 1.5.3 使能/失能日志输出锁
+
+
+
+默认为使能状态，当系统或MCU进入异常后，需要输出异常日志时，就必须失能日志输出锁，来保证异常日志能够被正常输出。
+
+```c
+void elog_output_lock_enabled(bool enabled)
+```
+
+> 实验日志：
+>
+> ```c
+> //Enable/disable  logger lock that determines all the area loggers output!!!	
+> elog_set_output_enabled(true);
+> //If i make it false then the system logger is disable,if not the system logger is print nomally
+> ```
+>
+> ![image-20240409191559712](https://zdh934.oss-cn-shenzhen.aliyuncs.com/PigGo/202404091915912.png)
+
+| 参数    | 描述                    |
+| ------- | ----------------------- |
+| enabled | true: 使能，false: 失能 |
+
+例子：
+
+```c
+/* EasyLogger断言钩子方法 */
+static void elog_user_assert_hook(const char* ex, const char* func, size_t line) {
+    /* 失能异步输出方式（异步输出模块自带方法） */
+    elog_async_enabled(false);
+    /* 失能日志输出锁 */
+    elog_output_lock_enabled(false);
+    /* 失能 EasyLogger 的 Flash 插件自带同步锁（Flash 插件自带方法） */
+    elog_flash_lock_enabled(false);
+    /* 输出断言信息 */
+    elog_a("elog", "(%s) has assert failed at %s:%ld.\n", ex, func, line);
+    /* 将缓冲区中所有日志保存至 Flash （Flash 插件自带方法） */
+    elog_flash_flush();
+    while(1);
+}
+```
+
+
+
+### 1.6 日志格式及样式
+
+
+
+#### 1.6.1 设置日志格式
+
+
+
+每种级别可对应一种日志输出格式，日志的输出内容位置顺序固定，只可定义开启或关闭某子内容。可设置的日志子内容包括：级别、标签、时间、进程信息、线程信息、文件路径、行号、方法名。
+
+> 注：默认为 RAW格式
+
+```c
+void elog_set_fmt(uint8_t level, size_t set)
+```
+
+> 实验日志：
+>
+> 这里之前从未打开过标签的开关，在这里抱着试试看的心态，是能了一下标签开关，没想到标签就在这里看到了，看来这些 **级别、标签、时间、进程信息、线程信息、文件路径、行号、方法名。**都是需要自己手动开启的。
+>
+> 另外的经验就是：标签开关当在一个文件内打开后，就会影响到所有有配置标签的文件，都会一并打印出来，这些对于自己调试的时候效果非常好，对于出产品则需要关闭全局的标签号，甚至从配置文件中关闭再作全局检查是否关闭标签输出。这样保证产品不会被抄，确保封闭性。
+>
+> ![image-20240409192514957](https://zdh934.oss-cn-shenzhen.aliyuncs.com/PigGo/202404091925020.png)
+>
+> ```c
+> #if 1 //##1.6 elog format(layout) and style
+> 	elog_set_fmt(ELOG_LVL_INFO,ELOG_FMT_TAG|ELOG_FMT_FUNC|ELOG_FMT_TIME);
+> 	elog_set_filter_tag_lvl("ET",ELOG_LVL_INFO);
+> 	log_a("elogtask1_test ET...\r\n");	
+> 	log_e("elogtask1_test ET...\r\n");	
+> 	log_w("elogtask1_test ET...\r\n");	
+> 	log_i("elogtask1_test ...\r\n");	
+> 	log_d("elogtask1_test ...\r\n");	
+> 	log_v("elogtask1_test ...\r\n");
+> 	#endif
+> ```
+
+| 参数  | 描述     |
+| ----- | -------- |
+| level | 级别     |
+| set   | 格式集合 |
+
+例子：
+
+```c
+/* 断言：输出所有内容 */
+elog_set_fmt(ELOG_LVL_ASSERT, ELOG_FMT_ALL);
+/* 错误：输出级别、标签和时间 */
+elog_set_fmt(ELOG_LVL_ERROR, ELOG_FMT_LVL | ELOG_FMT_TAG | ELOG_FMT_TIME);
+/* 警告：输出级别、标签和时间 */
+elog_set_fmt(ELOG_LVL_WARN, ELOG_FMT_LVL | ELOG_FMT_TAG | ELOG_FMT_TIME);
+/* 信息：输出级别、标签和时间 */
+elog_set_fmt(ELOG_LVL_INFO, ELOG_FMT_LVL | ELOG_FMT_TAG | ELOG_FMT_TIME);
+/* 调试：输出除了方法名之外的所有内容 */
+elog_set_fmt(ELOG_LVL_DEBUG, ELOG_FMT_ALL & ~ELOG_FMT_FUNC);
+/* 详细：输出除了方法名之外的所有内容 */
+elog_set_fmt(ELOG_LVL_VERBOSE, ELOG_FMT_ALL & ~ELOG_FMT_FUNC);
+```
+
+> 实验日志：对于输出的参数我们该如何选择？
+>
+> ![image-20240409194051143](https://zdh934.oss-cn-shenzhen.aliyuncs.com/PigGo/202404091940231.png)
+
+#### 1.6.2 使能/失能日志颜色
+
+
+
+日志颜色功能是将各个级别日志按照颜色进行区分，默认颜色功能是关闭的。日志的颜色修改方法详见《EasyLogger 移植说明》中的 `设置参数` 章节。
+
+```c
+void elog_set_text_color_enabled(bool enabled)
+```
+
+
+
+| 参数    | 描述                    |
+| ------- | ----------------------- |
+| enabled | true: 使能，false: 失能 |
+
+#### 1.6.3 查找日志级别
+
+
+
+在日志中查找该日志的级别。查找成功则返回其日志级别，查找失败则返回 -1 。
+
+> **注意** ：使用此功能时，请务必保证所有级别的设定的日志格式里均已开启输出日志级别功能，否则会断言错误。
+
+```c
+int8_t elog_find_lvl(const char *log)
+```
+
+> 实验日志：// failed!!! Not at all  用不了一点啊，断言了，CPU直接让给优先级最高的任务了。
+>
+> 老老实实每个任务进行必要打印就可以了，太多太杂太乱，难以控制。就直接断言了。
+
+| 参数 | 描述               |
+| ---- | ------------------ |
+| log  | 待查找的日志缓冲区 |
+
+#### 1.6.4 查找日志标签
+
+
+
+在日志中查找该日志的标签。查找成功则返回其日志标签及标签长度，查找失败则返回 NULL 。
+
+> **注意** ：使用此功能时，首先请务必保证该级别对应的设定日志格式中，已开启输出日志标签功能，否则会断言错误。其次需保证设定日志标签中 **不能包含空格** ，否则会查询失败。
+
+```c
+const char *elog_find_tag(const char *log, uint8_t lvl, size_t *tag_len)
+```
+
+
+
+| 参数    | 描述               |
+| ------- | ------------------ |
+| log     | 待查找的日志缓冲区 |
+| lvl     | 待查找日志的级别   |
+| tag_len | 查找到的标签长度   |
 
 
 
@@ -471,17 +743,19 @@ void elog_set_filter_tag_lvl(const char *tag, uint8_t level);
 | 开启 `wifi` 模块全部日志       | `elog_set_filter_tag_lvl("wifi", ELOG_FILTER_LVL_ALL);`    |
 | 设置 `wifi` 模块日志级别为警告 | `elog_set_filter_tag_lvl("wifi", ELOG_LVL_WARNING);`       |
 
-静态输出日志。动态好像没效果，不知道咋回事。
+## 静态过滤
+
+> #### 静态输出日志，指定全局输出固定级别的log，当然如果不是最高级的还是可以配合ZNS使用动态设置的。
 
 ![image-20240408114032364](https://zdh934.oss-cn-shenzhen.aliyuncs.com/PigGo/202404081140433.png)
 
 
 
+## 动态过滤：
 
+> #### 在配置文件采用默认的过滤策略，配合ZNS，自定义一个输入类型的API，传参值要从char 类型转换为 int 类型，给到elog_set_filter_lvl(level)中去，只要调用ZNS就可以动态地开启查看不同等级的log了。
 
-动态过滤
-
-
+![image-20240409162207617](https://zdh934.oss-cn-shenzhen.aliyuncs.com/PigGo/202404091622675.png)
 
 ![tutieshi_640x360_25s](https://zdh934.oss-cn-shenzhen.aliyuncs.com/PigGo/202404081200179.gif)
 
@@ -489,13 +763,101 @@ void elog_set_filter_tag_lvl(const char *tag, uint8_t level);
 
 
 
+## 模块化标签过滤的用法：
 
+> 在不同**任务模块文件**中可以自主设置需要打印的标签，先有标签后有过滤水准。两者缺一不可。如右图一样就是正确设置的结果。<u>（这里一定是分模块文件的，而不是指具体某个任务，因为#define 的作用域是当前整个文件）</u>
 
+![image-20240409161803063](https://zdh934.oss-cn-shenzhen.aliyuncs.com/PigGo/202404091618191.png)
 
+> #### 最新版本消息，就是即使同一个文件的任务设置不同的标签过滤等级，也可以生效，这可能于FreeRTOS是操作系统有关系，它的内存是动态创建的，每个任务都有一个独立的任务栈空间，或者堆空间，是一个相对独立的内存，所以elog对任务单独过滤是没问题的，即使在同一个文件中有多个任务，设置了标签后也可以过滤不同的等级。
 
+![image-20240409163954713](https://zdh934.oss-cn-shenzhen.aliyuncs.com/PigGo/202404091639768.png)
 
+```c
+//同一个文件中两个任务不同等级标签的过滤，RTOS的优势太大了，EasyLogger不仅轻量级，而且支持还挺多，后期用插件玩玩看。
+void watch_test1_entry(void *p)
+{
+	#if 0
+	while (1)
+	{
+		printf("watch test1 task run\r\n");
+		vTaskDelay(200);
+	}
+	#endif
+	#if 1
+	while (1)
+	{
+		elog_set_filter_tag_lvl("main.c",ELOG_LVL_INFO);
+		#if 0
+		elog_a("HELLO WORLD %s\t %d\t %s\t \r\n", __FILE__, __LINE__, __TIME__);
+		elog_d("HELLO WORLD %s\t %d\t %s\t \r\n", __FILE__, __LINE__, __TIME__);
+		elog_e("HELLO WORLD %s\t %d\t %s\t \r\n", __FILE__, __LINE__, __TIME__);
+		elog_i("HELLO WORLD %s\t %d\t %s\t \r\n", __FILE__, __LINE__, __TIME__);
+		elog_w("HELLO WORLD %s\t %d\t %s\t \r\n", __FILE__, __LINE__, __TIME__);
+		#endif
+		#if 1
+		log_a("HELLO WORLD %s\t %d\t %s\t \r\n", __FILE__, __LINE__, __TIME__);
+		log_e("HELLO WORLD %s\t %d\t %s\t \r\n", __FILE__, __LINE__, __TIME__);
+		log_w("HELLO WORLD %s\t %d\t %s\t \r\n", __FILE__, __LINE__, __TIME__);
+		log_i("HELLO WORLD %s\t %d\t %s\t \r\n", __FILE__, __LINE__, __TIME__);
+		log_d("HELLO WORLD %s\t %d\t %s\t \r\n", __FILE__, __LINE__, __TIME__);
+		log_v("HELLO WORLD %s\t %d\t %s\t \r\n", __FILE__, __LINE__, __TIME__);
+		#endif
+		#if 0
+		log_i("我是标签实验1! \r\n");
+		log_a("我是标签实验1! \r\n");
+		#endif
+		vTaskDelay(pdMS_TO_TICKS(1000));
+	}
 
+#endif
+}
+void watch_test2_entry(void *p)
+{
+	#if 0
+	while (1)
+	{
+		color_1++;
+		if(color_1 > 10)
+		{
+			color_1 = 0;
+			printf("\033[31m ERROR! \033[35m\r\n");
+		}
+		printf("watch test2 task run...\r\n");
+		vTaskDelay(200);
+	}
+	#endif
+	#if 1
+	while (1)
+	{
+		elog_set_filter_tag_lvl("main.c",ELOG_LVL_ERROR);
+		#if 0
+		elog_a("hello world %s\t %d\t %s\t \r\n", __FILE__, __LINE__, __TIME__);
+		elog_d("hello world %s\t %d\t %s\t \r\n", __FILE__, __LINE__, __TIME__);
+		elog_e("hello world %s\t %d\t %s\t \r\n", __FILE__, __LINE__, __TIME__);
+		elog_i("hello world %s\t %d\t %s\t \r\n", __FILE__, __LINE__, __TIME__);
+		elog_w("hello world %s\t %d\t %s\t \r\n", __FILE__, __LINE__, __TIME__);
+		#endif
+		#if 1
+		log_a("hello world %s\t %d\t %s\t \r\n", __FILE__, __LINE__, __TIME__);
+		log_e("hello world %s\t %d\t %s\t \r\n", __FILE__, __LINE__, __TIME__);
+		log_w("hello world %s\t %d\t %s\t \r\n", __FILE__, __LINE__, __TIME__);
+		log_i("hello world %s\t %d\t %s\t \r\n", __FILE__, __LINE__, __TIME__);
+		log_d("hello world %s\t %d\t %s\t \r\n", __FILE__, __LINE__, __TIME__);
+		log_v("hello world %s\t %d\t %s\t \r\n", __FILE__, __LINE__, __TIME__);
+		
+		#endif
+		#if 0
+		log_i("我是标签实验2! \r\n");
+		// elog_i("main.c","我是标签实验2! \r\n");
+		#endif
+		vTaskDelay(pdMS_TO_TICKS(1000));
+	}
 
+    #endif
+}
+
+```
 
 
 
