@@ -705,6 +705,8 @@ void elog_set_filter_tag(const char *tag)
 void elog_set_filter_kw(const char *keyword)
 ```
 
+> ## 演示视频：
+
 <video src="L:/OBS_Vedio/2024-04-10%2015-18-54.mkv"></video>
 
 > 关键字过滤演示视频。（作用是输出符合过滤要求的日志）
